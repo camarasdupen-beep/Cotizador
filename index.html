@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cotizador Loyverse</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f4f1ec; font-family: 'DM Sans', sans-serif; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #c8c3ba; border-radius: 2px; }
+    input::placeholder { color: #b0aa9f; }
+    .product-row:hover { background: #faf9f7 !important; }
+    .qty-btn:hover { background: #e8e4de !important; }
+    .export-btn:hover { opacity: 0.85 !important; }
+    .refresh-btn:hover { background: #f4f1ec !important; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useCallback } = React;
+
+    const fmt = (n) =>
+      new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n ?? 0);
+
+    function App() {
+      const [token, setToken] = useState("");
+      const [tokenSaved, setTokenSaved] = useState(false);
+      const [items, setItems] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState("");
+      const [search, setSearch] = useState("");
+      const [cart, setCart] = useState([]);
+      const [clientName, setClientName] = useState("");
+      const [note, setNote] = useState("");
+      const [exporting, setExporting] = useState(false);
+      const previewRef = useRef(null);
+
+      const fetchItems = useCallback(async (tok) => {
+        setLoading(true);
+        setError("");
+        try {
+          const res = await fetch("https://api.loyverse.com/v1.0/items?limit=250", {
+            headers: { Authorization: `Bearer ${tok}` },
+          });
+          if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
+          const data = await res.json();
+          setItems(data.items ?? []);
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      const handleSaveToken = () => {
+        if (!token.trim()) return;
+        setTokenSaved(true);
+        fetchItems(token.trim());
+      };
+
+      const addToCart = (item, variant) => {
+        setCart((prev) => {
+          const idx = prev.findIndex((c) => c.variant.variant_id === variant.variant_id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
+            return next;
+          }
+          return [...prev, { item, variant, qty: 1 }];
+        });
+      };
+
+      const updateQty = (variantId, delta) => {
+        setCart((prev) =>
+          prev
+            .map((c) => c.variant.variant_id === variantId ? { ...c, qty: c.qty + delta } : c)
+            .filter((c) => c.qty > 0)
+        );
+      };
+
+      const total = cart.reduce((s, c) => s + (c.variant.default_price ?? 0) * c.qty, 0);
+
+      const filtered = items.filter((it) =>
+        it.item_name.toLowerCase().includes(search.toLowerCase())
+      );
+
+      const today = new Date().toLocaleDateString("es-MX", {
+        day: "2-digit", month: "long", year: "numeric",
+      });
+
+      const exportPNG = async () => {
+        if (!previewRef.current || cart.length === 0) return;
+        setExporting(true);
+        try {
+          if (!window.html2canvas) {
+            await new Promise((res, rej) => {
+              const s = document.createElement("script");
+              s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+              s.onload = res; s.onerror = rej;
+              document.head.appendChild(s);
+            });
+          }
+          const canvas = await window.html2canvas(previewRef.current, {
+            scale: 2, useCORS: true, backgroundColor: "#ffffff",
+          });
+          const link = document.createElement("a");
+          link.download = `presupuesto-${Date.now()}.png`;
+          link.href = canvas.toDataURL("image/png");
+          link.click();
+        } catch (e) {
+          alert("Error al exportar: " + e.message);
+        } finally {
+          setExporting(false);
+        }
+      };
+
+      if (!tokenSaved) return (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
+          <div style={{ background:"#fff", borderRadius:16, padding:40, maxWidth:400, width:"100%", boxShadow:"0 4px 24px rgba(0,0,0,0.07)", display:"flex", flexDirection:"column", gap:14 }}>
+            <p style={{ fontSize:20, fontWeight:600 }}>Token de Loyverse</p>
+            <p style={{ fontSize:14, color:"#7a736a", lineHeight:1.5 }}>Pega tu token de acceso para conectar tu catálogo</p>
+            <input
+              type="password"
+              placeholder="eyJhbGci…"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSaveToken()}
+              style={{ fontFamily:"'DM Mono',monospace", fontSize:13, padding:"10px 14px", border:"1px solid #e0dbd2", borderRadius:8, outline:"none", color:"#2a2520", background:"#faf9f7" }}
+            />
+            <button
+              onClick={handleSaveToken}
+              style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:15, background:"#2a2520", color:"#f4f1ec", border:"none", borderRadius:8, padding:"12px 24px", cursor:"pointer", alignSelf:"flex-end" }}
+            >
+              Conectar →
+            </button>
+          </div>
+        </div>
+      );
+
+      return (
+        <div style={{ fontFamily:"'DM Sans',sans-serif", minHeight:"100vh", background:"#f4f1ec", color:"#2a2520" }}>
+
+          {/* header */}
+          <header style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 32px", borderBottom:"1px solid #e0dbd2", background:"#fff" }}>
+            <span style={{ fontFamily:"'DM Mono',monospace", fontWeight:500, fontSize:15, letterSpacing:"0.06em" }}>⬡ cotizador</span>
+            <button className="refresh-btn" onClick={() => fetchItems(token)} style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:500, background:"transparent", border:"1px solid #c8c3ba", borderRadius:6, padding:"6px 14px", cursor:"pointer", color:"#5a5550" }}>
+              {loading ? "…" : "↻ Actualizar"}
+            </button>
+          </header>
+
+          <div style={{ display:"flex", height:"calc(100vh - 61px)" }}>
+
+            {/* catalog */}
+            <aside style={{ width:320, borderRight:"1px solid #e0dbd2", background:"#fff", display:"flex", flexDirection:"column", padding:"20px 0" }}>
+              <p style={{ fontFamily:"'DM Mono',monospace", fontSize:10, letterSpacing:"0.1em", color:"#a09890", padding:"0 20px 10px" }}>
+                CATÁLOGO · {items.length} productos
+              </p>
+              <input
+                placeholder="Buscar producto…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ margin:"0 16px 12px", fontFamily:"'DM Sans',sans-serif", fontSize:14, padding:"9px 12px", border:"1px solid #e0dbd2", borderRadius:8, background:"#faf9f7", outline:"none", color:"#2a2520" }}
+              />
+              {error && <p style={{ fontSize:13, color:"#c0392b", padding:"8px 20px" }}>{error}</p>}
+              {loading
+                ? <p style={{ fontSize:13, color:"#a09890", padding:"16px 20px" }}>Cargando productos…</p>
+                : <div style={{ flex:1, overflowY:"auto" }}>
+                    {filtered.map((item) =>
+                      (item.variants ?? []).map((variant) => (
+                        <div
+                          key={variant.variant_id}
+                          className="product-row"
+                          onClick={() => addToCart(item, variant)}
+                          style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 20px", cursor:"pointer", borderBottom:"1px solid #f0ece5", background:"#fff" }}
+                        >
+                          <div>
+                            <p style={{ fontSize:14, fontWeight:500 }}>{item.item_name}</p>
+                            {variant.sku && <p style={{ fontSize:11, color:"#a09890", marginTop:2 }}>{variant.sku}</p>}
+                          </div>
+                          <span style={{ fontFamily:"'DM Mono',monospace", fontSize:13, color:"#5a5550", whiteSpace:"nowrap" }}>
+                            {fmt(variant.default_price)}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                    {filtered.length === 0 && <p style={{ fontSize:13, color:"#a09890", padding:"16px 20px" }}>Sin resultados</p>}
+                  </div>
+              }
+            </aside>
+
+            {/* builder */}
+            <main style={{ flex:1, padding:28, overflowY:"auto", display:"flex", flexDirection:"column", gap:16 }}>
+              <p style={{ fontFamily:"'DM Mono',monospace", fontSize:10, letterSpacing:"0.1em", color:"#a09890" }}>PRESUPUESTO</p>
+
+              <div style={{ display:"flex", gap:10 }}>
+                <input
+                  placeholder="Nombre del cliente"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                  style={{ flex:1, fontFamily:"'DM Sans',sans-serif", fontSize:14, padding:"10px 14px", border:"1px solid #e0dbd2", borderRadius:8, background:"#fff", outline:"none", color:"#2a2520" }}
+                />
+                <input
+                  placeholder="Nota opcional"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  style={{ flex:1, fontFamily:"'DM Sans',sans-serif", fontSize:13, padding:"10px 14px", border:"1px solid #e0dbd2", borderRadius:8, background:"#fff", outline:"none", color:"#2a2520" }}
+                />
+              </div>
+
+              {cart.length === 0
+                ? <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", background:"#fff", borderRadius:12, border:"1px dashed #ddd8d0", color:"#b0aa9f", fontSize:14, minHeight:200 }}>
+                    ← Toca un producto para agregarlo
+                  </div>
+                : <div style={{ background:"#fff", borderRadius:12, border:"1px solid #e0dbd2", overflow:"hidden" }}>
+                    {cart.map(({ item, variant, qty }) => (
+                      <div key={variant.variant_id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 18px", borderBottom:"1px solid #f0ece5" }}>
+                        <div style={{ flex:1 }}>
+                          <p style={{ fontSize:14, fontWeight:500 }}>{item.item_name}</p>
+                          <p style={{ fontSize:12, color:"#a09890", marginTop:2 }}>{fmt(variant.default_price)} c/u</p>
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <button className="qty-btn" onClick={() => updateQty(variant.variant_id, -1)} style={{ width:26, height:26, borderRadius:6, border:"1px solid #e0dbd2", background:"#faf9f7", cursor:"pointer", fontSize:16, fontWeight:500, color:"#2a2520" }}>−</button>
+                          <span style={{ fontFamily:"'DM Mono',monospace", fontSize:14, width:24, textAlign:"center" }}>{qty}</span>
+                          <button className="qty-btn" onClick={() => updateQty(variant.variant_id, +1)} style={{ width:26, height:26, borderRadius:6, border:"1px solid #e0dbd2", background:"#faf9f7", cursor:"pointer", fontSize:16, fontWeight:500, color:"#2a2520" }}>+</button>
+                        </div>
+                        <span style={{ fontFamily:"'DM Mono',monospace", fontSize:14, fontWeight:600, width:90, textAlign:"right" }}>
+                          {fmt((variant.default_price ?? 0) * qty)}
+                        </span>
+                      </div>
+                    ))}
+                    <div style={{ display:"flex", justifyContent:"space-between", padding:"14px 18px", background:"#2a2520" }}>
+                      <span style={{ fontFamily:"'DM Mono',monospace", fontSize:11, letterSpacing:"0.1em", color:"#a09890" }}>TOTAL</span>
+                      <span style={{ fontFamily:"'DM Mono',monospace", fontSize:18, fontWeight:600, color:"#f4f1ec" }}>{fmt(total)}</span>
+                    </div>
+                  </div>
+              }
+
+              <button
+                className="export-btn"
+                onClick={exportPNG}
+                disabled={cart.length === 0 || exporting}
+                style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:15, background:"#2a2520", color:"#f4f1ec", border:"none", borderRadius:10, padding:"14px 28px", cursor:"pointer", alignSelf:"flex-start", opacity: cart.length === 0 ? 0.4 : 1, transition:"opacity 0.2s" }}
+              >
+                {exporting ? "Generando…" : "⬇ Descargar PNG"}
+              </button>
+            </main>
+          </div>
+
+          {/* off-screen preview */}
+          {cart.length > 0 && (
+            <div style={{ position:"absolute", left:-9999, top:0 }}>
+              <div ref={previewRef} style={{ width:620, background:"#fff", fontFamily:"'DM Sans',sans-serif", color:"#2a2520" }}>
+                <div style={{ height:6, background:"#2a2520" }} />
+                <div style={{ padding:"28px 36px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20 }}>
+                    <div>
+                      {clientName && <p style={{ fontSize:18, fontWeight:600 }}>{clientName}</p>}
+                      {note && <p style={{ fontSize:13, color:"#7a736a", marginTop:4 }}>{note}</p>}
+                    </div>
+                    <p style={{ fontFamily:"'DM Mono',monospace", fontSize:12, color:"#a09890" }}>{today}</p>
+                  </div>
+                  <div style={{ height:1, background:"#e0dbd2", marginBottom:16 }} />
+                  <div style={{ display:"flex", gap:8, fontFamily:"'DM Mono',monospace", fontSize:10, letterSpacing:"0.08em", color:"#a09890", padding:"0 12px 8px" }}>
+                    <span style={{ flex:1 }}>Producto</span>
+                    <span style={{ width:60, textAlign:"center" }}>Cant.</span>
+                    <span style={{ width:90, textAlign:"right" }}>Precio</span>
+                    <span style={{ width:100, textAlign:"right" }}>Subtotal</span>
+                  </div>
+                  {cart.map(({ item, variant, qty }, i) => (
+                    <div key={variant.variant_id} style={{ display:"flex", gap:8, fontSize:14, padding:"9px 12px", alignItems:"center", background: i % 2 === 0 ? "#faf9f7" : "#fff" }}>
+                      <span style={{ flex:1 }}>{item.item_name}</span>
+                      <span style={{ width:60, textAlign:"center" }}>{qty}</span>
+                      <span style={{ width:90, textAlign:"right" }}>{fmt(variant.default_price)}</span>
+                      <span style={{ width:100, textAlign:"right", fontWeight:600 }}>{fmt((variant.default_price ?? 0) * qty)}</span>
+                    </div>
+                  ))}
+                  <div style={{ display:"flex", justifyContent:"space-between", background:"#2a2520", color:"#f4f1ec", padding:"14px 16px", marginTop:4, fontFamily:"'DM Mono',monospace", fontSize:11, letterSpacing:"0.1em", alignItems:"center" }}>
+                    <span>TOTAL</span>
+                    <span style={{ fontSize:20, fontWeight:700 }}>{fmt(total)}</span>
+                  </div>
+                </div>
+                <p style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:"#c8c3ba", textAlign:"center", padding:"12px 0 16px", letterSpacing:"0.06em" }}>
+                  Cotización generada · {today}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
