@@ -50,13 +50,17 @@
     const fetchItems = useCallback(async (tok) => {
       setLoading(true); setError("");
       try {
-        const res = await fetch(`${API}/items?limit=250`, {
-          headers: { Authorization: `Bearer ${tok}` },
-        });
-        if (res.status === 401) throw new Error("Token inválido.");
-        if (!res.ok) throw new Error(`Error ${res.status}`);
-        const data = await res.json();
-        setItems(data.items ?? []);
+        let all = [], cursor = null;
+        do {
+          const url = `${API}/items?limit=250` + (cursor ? `&cursor=${cursor}` : "");
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${tok}` } });
+          if (res.status === 401) throw new Error("Token inválido.");
+          if (!res.ok) throw new Error(`Error ${res.status}`);
+          const data = await res.json();
+          all = all.concat(data.items ?? []);
+          cursor = data.cursor || null;
+        } while (cursor);
+        setItems(all);
       } catch (e) {
         setError(e.message);
       } finally {
